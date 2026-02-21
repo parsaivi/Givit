@@ -490,6 +490,7 @@ int is_changed_last_commit(char *filepath) {// filepath format is : ./filepath
     sscanf(temp, "branch: %s %s", branch, trash);
     // find last commit in this branch:
     Commit *head = loadList(".givit/commitsdb");
+    if (head == NULL) return 0;
     head = fix_commits(head);
     Commit *node = head;
     while (node != NULL) {
@@ -498,6 +499,7 @@ int is_changed_last_commit(char *filepath) {// filepath format is : ./filepath
         }
         node = node->prev_commit;
     }
+    if (node == NULL) return 0;
     //find last commit directory:
     char commited_path[1024];
     strcpy(commited_path, node->dir_path);
@@ -536,6 +538,7 @@ bool is_changed_lastcommit_general(
     sscanf(temp, "branch: %s %s", branch, trash);
     // find last commit in this branch:
     Commit *head = loadList(".givit/commitsdb");
+    if (head == NULL) return false;
     head = fix_commits(head);
     Commit *node = head;
     while (node != NULL) {
@@ -544,6 +547,7 @@ bool is_changed_lastcommit_general(
         }
         node = node->prev_commit;
     }
+    if (node == NULL) return false;
     //find last commit directory:
     strcpy(commited_path, node->dir_path);
     strcat(commited_path, filepath);
@@ -996,8 +1000,14 @@ int read_adminator(char *username, char *email) {
     const char *home = getenv("HOME");
     chdir(home);
     FILE *admin = fopen("CLionProjects/Givit/config", "r");
+    if (admin == NULL) {
+        strcpy(username, "admin");
+        strcpy(email, "admin@givit.com");
+        return 1;
+    }
     fgets(username, MAX_CONFIG_LENGTH, admin);
     fgets(email, MAX_CONFIG_LENGTH, admin);
+    fclose(admin);
     check_valid(username);
     check_valid(email);
     return 0;
@@ -1109,6 +1119,7 @@ int run_reset(int argc, char *const argv[]) {
             return 1;
         }
     }
+    return 0;
 }
 
 void remove_from_staging(
@@ -1821,6 +1832,7 @@ int run_checkout(int argc, char *const argv[], int hour, int minute, int second,
         }
         node = node->prev_commit;
     }
+    return 1;
 }
 
 int run_revert(int argc, char *const argv[], int hour, int minute, int second, Commit *head) {//checkout and commit
@@ -1919,6 +1931,7 @@ int run_revert(int argc, char *const argv[], int hour, int minute, int second, C
         strcat(cmd, message);
         system(cmd);
     }
+    return 0;
 }
 
 bool line_is_empty(char *line) {
@@ -2070,6 +2083,7 @@ int run_tag(int argc, char *const argv[], int hour, int minute, int second,
         perror("please enter a valid command");
         return 1;
     }
+    return 0;
 }
 
 void sort_tags() {
@@ -2168,7 +2182,6 @@ void compare_commit_directories(char *commit1_path, char *commit2_path) {
             }
         } else {
             printf("\e[36mFile %s exists only in the first commit directory.\e[m\n", entry1->d_name);
-            fclose(check);
         }
 
     }
@@ -2180,16 +2193,17 @@ void compare_commit_directories(char *commit1_path, char *commit2_path) {
 
         strcpy(file1_path, commit1_path);
         strcat(file1_path, "/");
-        strcat(file1_path, entry1->d_name);
+        strcat(file1_path, entry2->d_name);
         strcpy(file2_path, commit2_path);
         strcat(file2_path, "/");
-        strcat(file2_path, entry1->d_name);
+        strcat(file2_path, entry2->d_name);
 
         FILE *check = fopen(file1_path, "r");
-        if (check != NULL) {
+        if (check == NULL) {
             printf("\e[36mFile %s exists only in the second commit directory.\e[m\n", file2_path);
+        } else {
+            fclose(check);
         }
-        fclose(check);
     }
 
     closedir(dir1);
@@ -2529,19 +2543,19 @@ int run_diff(int argc,
         perror("please enter a valid command");
         return 1;
     }
-    if (argc == 5) {
-        sprintf(argv[6], "%d-%d", 1, 1000);
-        sprintf(argv[8], "%d-%d", 1, 1000);
-    }
+    int begin_line1 = 1, end_line1 = 1000, begin_line2 = 1, end_line2 = 1000;
     char file1_path[MAX_LINE_LENGTH];
     char file2_path[MAX_LINE_LENGTH];
     strcpy(file1_path, "./");
     strcpy(file2_path, "./");
     strcat(file1_path, argv[3]);
     strcat(file2_path, argv[4]);
-    int begin_line1, end_line1, begin_line2, end_line2;
-    sscanf(argv[6], "%d-%d", &begin_line1, &end_line1);
-    sscanf(argv[8], "%d-%d", &begin_line2, &end_line2);
+    if (argc > 6) {
+        sscanf(argv[6], "%d-%d", &begin_line1, &end_line1);
+    }
+    if (argc > 8) {
+        sscanf(argv[8], "%d-%d", &begin_line2, &end_line2);
+    }
     char cmd[1024];
     strcpy(cmd, "cp -R ");
     strcat(cmd, file1_path);
@@ -2613,6 +2627,7 @@ int run_merge(int argc, char *const argv[]) {
         saveList(head, ".givit/commitsdb");
         return 0;
     }
+    return 1;
 }
 
 void filename_to_filepath(char *filename, char *cwd) {
@@ -2671,7 +2686,7 @@ int check_alias_exist(char *alias) {
 }
 
 int print_head(Commit *head) {// show commits in tree:
-
+    return 0;
 }
 
 int run_grep(int argc, char *const argv[]) {//givit grep -f <file> -p <word> [-c <commit-id>] [-n]
@@ -2755,6 +2770,7 @@ int run_grep(int argc, char *const argv[]) {//givit grep -f <file> -p <word> [-c
         }
         fclose(file);
     }
+    return 0;
 }
 
 int todo_check(char *filepath) {
@@ -3224,6 +3240,7 @@ int run_precommit(int argc, char *const argv[]) {
         }
         return 0;
     }
+    return 1;
 }
 
 int main(int argc, char *argv[]) {
