@@ -1,6 +1,7 @@
 #include "utils.h"
 #include "commit.h"
 #include "repository.h"
+#include "hooks.h"
 
 #define COMMITSDB_PATH  GIVIT_DIR "/commitsdb"
 #define STATE_PATH      GIVIT_DIR "/state"
@@ -313,16 +314,41 @@ int run_commit(int argc, char *argv[]) {
             return 1;
     }
 
+    FILE *stg = fopen(".givit/staging", "r");
+    if (!stg) {
+        fprintf(stderr, "nothing to commit, staging area is empty\n");
+        return 1;
+    }
+    char stg_line[MAX_LINE_LEN];
+    bool has_staged = false;
+    while (fgets(stg_line, sizeof(stg_line), stg) != NULL) {
+        strip_newline(stg_line);
+        if (strlen(stg_line) > 0) { has_staged = true; break; }
+    }
+    fclose(stg);
+    if (!has_staged) {
+        fprintf(stderr, "nothing to commit, staging area is empty\n");
+        return 1;
+    }
+
+    if (precommit_check_staged()) {
+        fprintf(stderr, "pre-commit hooks failed, commit aborted\n");
+        return 1;
+    }
+
     Commit *head = commit_load_list(COMMITSDB_PATH);
     head = commit_create_snapshot(message, head);
 
-    char cmd[MAX_PATH_LEN * 2];
-    snprintf(cmd, sizeof(cmd), "cp %s/staging %s/last_staging", GIVIT_DIR, GIVIT_DIR);
-    system(cmd);
-    snprintf(cmd, sizeof(cmd), "cp -r %s/staged/ %s/last_commit", GIVIT_DIR, GIVIT_DIR);
-    system(cmd);
-    snprintf(cmd, sizeof(cmd), "rm -rf %s/staged/*", GIVIT_DIR);
-    system(cmd);
+    copy_file(".givit/staging", ".givit/last_staging");
+    if (dir_exists(".givit/last_commit"))
+        remove_dir(".givit/last_commit");
+    ensure_dir(".givit/last_commit");
+    copy_dir(".givit/staged", ".givit/last_commit");
+    remove_dir(".givit/staged");
+    ensure_dir(".givit/staged");
+
+    FILE *sf = fopen(".givit/staging", "w");
+    if (sf) fclose(sf);
 
     commit_free_list(head);
     return 0;

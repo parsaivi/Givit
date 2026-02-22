@@ -3,6 +3,88 @@
 #include "repository.h"
 #include "staging.h"
 
+static void restore_snapshot(const char *snapshot_path)
+{
+    DIR *dir = opendir(snapshot_path);
+    if (dir == NULL)
+        return;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        char src[MAX_PATH_LEN], dst[MAX_PATH_LEN];
+        path_join(src, snapshot_path, entry->d_name);
+        path_join(dst, ".", entry->d_name);
+
+        if (entry->d_type == DT_DIR) {
+            ensure_dir(dst);
+            copy_dir(src, dst);
+        } else {
+            copy_file(src, dst);
+        }
+    }
+    closedir(dir);
+}
+
+static bool has_uncommitted_changes(Commit *head)
+{
+    char username[MAX_NAME_LEN], email[MAX_NAME_LEN];
+    char current_branch[MAX_NAME_LEN], parent_branch[MAX_NAME_LEN];
+    repo_read_config(username, email, current_branch, parent_branch);
+
+    Commit *node = head;
+    while (node != NULL) {
+        if (strcmp(node->branch, current_branch) == 0)
+            break;
+        node = node->prev;
+    }
+    if (node == NULL)
+        return false;
+
+    /* Check if staging file has any entries */
+    FILE *fp = fopen(".givit/staging", "r");
+    if (fp != NULL) {
+        char line[MAX_LINE_LEN];
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            strip_newline(line);
+            if (strlen(line) > 0) {
+                fclose(fp);
+                return true;
+            }
+        }
+        fclose(fp);
+    }
+
+    /* Check if any tracked file differs from the last commit snapshot */
+    fp = fopen(".givit/tracks", "r");
+    if (fp != NULL) {
+        char line[MAX_LINE_LEN];
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            strip_newline(line);
+            if (strlen(line) == 0)
+                continue;
+
+            char committed[MAX_PATH_LEN];
+            path_join(committed, node->snapshot_path, line);
+
+            if (file_exists(line) && file_exists(committed)) {
+                if (files_differ(line, committed)) {
+                    fclose(fp);
+                    return true;
+                }
+            } else if (file_exists(line) != file_exists(committed)) {
+                fclose(fp);
+                return true;
+            }
+        }
+        fclose(fp);
+    }
+
+    return false;
+}
+
 int run_branch(int argc, char *argv[])
 {
     Commit *head = commit_load_list(".givit/commitsdb");
@@ -92,6 +174,12 @@ int run_checkout(int argc, char *argv[])
         return 1;
     }
 
+    if (has_uncommitted_changes(head)) {
+        fprintf(stderr, "error: you have uncommitted changes, please commit or stash them first\n");
+        commit_free_list(head);
+        return 1;
+    }
+
     /* Try branch checkout first */
     FILE *fp = fopen(".givit/branches", "r");
     if (fp != NULL) {
@@ -121,10 +209,13 @@ int run_checkout(int argc, char *argv[])
                     }
 
                     remove_working_files();
+                    restore_snapshot(node->snapshot_path);
 
-                    char cmd[MAX_PATH_LEN + 32];
-                    snprintf(cmd, sizeof(cmd), "cp -r %s/* .", node->snapshot_path);
-                    system(cmd);
+                    FILE *detached = fopen(".givit/detached", "w");
+                    if (detached != NULL) {
+                        fprintf(detached, "1");
+                        fclose(detached);
+                    }
 
                     commit_free_list(head);
                     return 0;
@@ -159,10 +250,16 @@ int run_checkout(int argc, char *argv[])
         }
 
         remove_working_files();
+        restore_snapshot(node->snapshot_path);
 
-        char cmd[MAX_PATH_LEN + 32];
-        snprintf(cmd, sizeof(cmd), "cp -r %s/* .", node->snapshot_path);
-        system(cmd);
+        FILE *detached = fopen(".givit/detached", "w");
+        if (detached != NULL) {
+            if (offset == 0)
+                fprintf(detached, "1");
+            else
+                fprintf(detached, "0");
+            fclose(detached);
+        }
 
         commit_free_list(head);
         return 0;
@@ -178,10 +275,7 @@ int run_checkout(int argc, char *argv[])
     }
 
     remove_working_files();
-
-    char cmd[MAX_PATH_LEN + 32];
-    snprintf(cmd, sizeof(cmd), "cp -r %s/* .", node->snapshot_path);
-    system(cmd);
+    restore_snapshot(node->snapshot_path);
 
     /* Check if this commit is the latest on its branch (detached HEAD) */
     Commit *latest = head;
@@ -292,22 +386,37 @@ int run_revert(int argc, char *argv[])
         }
     }
 
-    commit_free_list(head);
-
-    char id_str[32];
-    snprintf(id_str, sizeof(id_str), "%d", commit_id);
-
-    char cmd[MAX_PATH_LEN];
-    snprintf(cmd, sizeof(cmd), "givit checkout %s", id_str);
-    system(cmd);
-
-    if (!no_commit) {
-        system("givit add *");
-
-        char commit_cmd[MAX_PATH_LEN + MAX_MSG_LEN];
-        snprintf(commit_cmd, sizeof(commit_cmd), "givit commit -m %s", message);
-        system(commit_cmd);
+    /* Checkout the target commit directly */
+    Commit *target = commit_find_by_id(head, commit_id);
+    if (target == NULL) {
+        perror("commit not found for revert");
+        commit_free_list(head);
+        return 1;
     }
 
+    remove_working_files();
+    restore_snapshot(target->snapshot_path);
+
+    if (!no_commit) {
+        /* Stage all working files (skip .givit) */
+        DIR *dir = opendir(".");
+        if (dir != NULL) {
+            struct dirent *entry;
+            while ((entry = readdir(dir)) != NULL) {
+                if (strcmp(entry->d_name, ".") == 0 ||
+                    strcmp(entry->d_name, "..") == 0 ||
+                    strcmp(entry->d_name, ".givit") == 0)
+                    continue;
+                add_file_or_dir(entry->d_name, ".");
+            }
+            closedir(dir);
+        }
+
+        /* Create a new commit */
+        head = commit_create_snapshot(message, head);
+        commit_save_list(head, ".givit/commitsdb");
+    }
+
+    commit_free_list(head);
     return 0;
 }

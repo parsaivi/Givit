@@ -54,21 +54,17 @@ static int eof_blank_space(const char *filepath)
     if (file == NULL) return -1;
 
     char line[MAX_LINE_LEN];
-    char last_line[MAX_LINE_LEN] = "";
     while (fgets(line, MAX_LINE_LEN, file) != NULL) {
-        strcpy(last_line, line);
-    }
-    fclose(file);
-
-    int len = strlen(last_line);
-    if (len > 0) {
-        /* check trailing whitespace before newline */
+        int len = strlen(line);
+        /* remove newline for checking */
         int check_pos = len - 1;
-        if (last_line[check_pos] == '\n') check_pos--;
-        while (check_pos >= 0 && (last_line[check_pos] == ' ' || last_line[check_pos] == '\t')) {
-            return 1; /* FAILED: trailing whitespace */
+        if (check_pos >= 0 && line[check_pos] == '\n') check_pos--;
+        if (check_pos >= 0 && (line[check_pos] == ' ' || line[check_pos] == '\t')) {
+            fclose(file);
+            return 1; /* FAILED: trailing whitespace found */
         }
     }
+    fclose(file);
     return 0;
 }
 
@@ -260,6 +256,21 @@ static int apply_hooks_to_dir(const char *dir_path)
     }
     closedir(dir);
     return failed;
+}
+
+int precommit_check_staged(void)
+{
+    FILE *ah = fopen(".givit/applied_hooks", "r");
+    if (ah == NULL) return 0;
+    char temp[MAX_LINE_LEN];
+    bool has_hooks = false;
+    while (fgets(temp, MAX_LINE_LEN, ah) != NULL) {
+        strip_newline(temp);
+        if (strlen(temp) > 0) { has_hooks = true; break; }
+    }
+    fclose(ah);
+    if (!has_hooks) return 0;
+    return apply_hooks_to_dir(".givit/staged");
 }
 
 int run_precommit(int argc, char *argv[])

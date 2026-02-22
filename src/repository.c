@@ -3,6 +3,24 @@
 
 static int create_configs(const char *username, const char *email);
 
+static bool is_valid_command(const char *cmd_str)
+{
+    char first_word[MAX_NAME_LEN];
+    sscanf(cmd_str, "%s", first_word);
+
+    const char *valid_cmds[] = {
+        "init", "config", "add", "reset", "status", "commit",
+        "set", "replace", "remove", "log", "branch", "checkout",
+        "revert", "tag", "pre-commit", "grep", "diff", "merge", "stash",
+        NULL
+    };
+    for (int i = 0; valid_cmds[i] != NULL; i++) {
+        if (strcmp(first_word, valid_cmds[i]) == 0)
+            return true;
+    }
+    return false;
+}
+
 bool repo_exists(void)
 {
     char cwd[MAX_PATH_LEN];
@@ -141,7 +159,7 @@ int run_init(int argc, char *argv[])
 
     if (repo_exists()) {
         fprintf(stderr, "givit repository has already initialized\n");
-        return 0;
+        return 1;
     }
 
     if (mkdir(GIVIT_DIR, 0755) != 0)
@@ -304,6 +322,10 @@ int run_config(int argc, char *argv[])
         return 0;
     } else if (strncmp(argv[2], "alias.", 6) == 0) {
         const char *alias_name = argv[2] + 6;
+        if (!is_valid_command(argv[3])) {
+            fprintf(stderr, "error: '%s' is not a valid givit command\n", argv[3]);
+            return 1;
+        }
         FILE *fp = fopen(".givit/aliases", "a");
         if (fp == NULL)
             return 1;
@@ -445,6 +467,10 @@ int run_global_config(int argc, char *argv[])
         return 0;
     } else if (strncmp(argv[3], "alias.", 6) == 0) {
         const char *alias_name = argv[3] + 6;
+        if (!is_valid_command(argv[4])) {
+            fprintf(stderr, "error: '%s' is not a valid givit command\n", argv[4]);
+            return 1;
+        }
 
         /* add to all repos */
         FILE *repos = fopen(repos_path, "r");

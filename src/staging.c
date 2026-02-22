@@ -455,5 +455,23 @@ int run_status(int argc, char *argv[])
         print_status_recursive(path, 0);
     }
     closedir(dir);
+
+    FILE *fp = fopen(".givit/tracks", "r");
+    if (fp != NULL) {
+        char line[MAX_LINE_LEN];
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            strip_newline(line);
+            if (strlen(line) == 0)
+                continue;
+            if (!file_exists(line)) {
+                char *filename = extract_filename(line);
+                char x = is_staged(line) ? '+' : '-';
+                printf("\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80 %s %cD\n", filename, x);
+                free(filename);
+            }
+        }
+        fclose(fp);
+    }
+
     return 0;
 }

@@ -234,6 +234,51 @@ static int stash_list(void)
     return 0;
 }
 
+static void show_stash_diff_recursive(const char *stash_dir, const char *base_dir)
+{
+    DIR *dir = opendir(stash_dir);
+    if (dir == NULL) return;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        char stash_path[MAX_PATH_LEN], base_path[MAX_PATH_LEN];
+        path_join(stash_path, stash_dir, entry->d_name);
+        path_join(base_path, base_dir, entry->d_name);
+
+        if (entry->d_type == DT_DIR) {
+            show_stash_diff_recursive(stash_path, base_path);
+        } else {
+            if (!dir_exists(base_dir) || !file_exists(base_path)) {
+                printf("New file: %s\n", entry->d_name);
+            } else {
+                printf("Modified: %s\n", entry->d_name);
+                /* simple line-by-line diff */
+                FILE *sf = fopen(stash_path, "r");
+                FILE *bf = fopen(base_path, "r");
+                char sl[MAX_LINE_LEN], bl[MAX_LINE_LEN];
+                int ln = 0;
+                while (fgets(sl, MAX_LINE_LEN, sf) != NULL &&
+                       fgets(bl, MAX_LINE_LEN, bf) != NULL) {
+                    ln++;
+                    strip_newline(sl);
+                    strip_newline(bl);
+                    if (strcmp(sl, bl) != 0) {
+                        printf("  line %d:\n", ln);
+                        printf("    - %s\n", bl);
+                        printf("    + %s\n", sl);
+                    }
+                }
+                fclose(sf);
+                fclose(bf);
+            }
+        }
+    }
+    closedir(dir);
+}
+
 static int stash_show(int index)
 {
     char stash_dir[MAX_PATH_LEN];
@@ -280,51 +325,7 @@ static int stash_show(int index)
         return 1;
     }
 
-    /* show diff between stash dir and base commit snapshot */
-    DIR *dir = opendir(stash_dir);
-    if (dir == NULL) {
-        commit_free_list(head);
-        return 1;
-    }
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-            continue;
-
-        char stash_file[MAX_PATH_LEN], base_file[MAX_PATH_LEN];
-        path_join(stash_file, stash_dir, entry->d_name);
-        path_join(base_file, base->snapshot_path, entry->d_name);
-
-        if (entry->d_type == DT_DIR) {
-            continue; /* simplified: skip subdirs in show */
-        }
-
-        if (file_exists(base_file)) {
-            printf("Modified: %s\n", entry->d_name);
-            /* simple line-by-line diff */
-            FILE *sf = fopen(stash_file, "r");
-            FILE *bf = fopen(base_file, "r");
-            char sl[MAX_LINE_LEN], bl[MAX_LINE_LEN];
-            int ln = 0;
-            while (fgets(sl, MAX_LINE_LEN, sf) != NULL &&
-                   fgets(bl, MAX_LINE_LEN, bf) != NULL) {
-                ln++;
-                strip_newline(sl);
-                strip_newline(bl);
-                if (strcmp(sl, bl) != 0) {
-                    printf("  line %d:\n", ln);
-                    printf("    - %s\n", bl);
-                    printf("    + %s\n", sl);
-                }
-            }
-            fclose(sf);
-            fclose(bf);
-        } else {
-            printf("New file: %s\n", entry->d_name);
-        }
-    }
-    closedir(dir);
+    show_stash_diff_recursive(stash_dir, base->snapshot_path);
     commit_free_list(head);
     return 0;
 }

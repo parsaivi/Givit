@@ -1,8 +1,37 @@
 #define _XOPEN_SOURCE 700
 #include "commit.h"
 #include "utils.h"
+#include <dirent.h>
+#include <sys/stat.h>
 
 #define SEPARATOR "\e[37m><<<<<><<<<<><<<<<><<<<<><<<<<><<<<<><<<<<><<<<<><<<<<><<<<<><<<<<><<<<<\e[m"
+
+static int count_snapshot_files(const char *snapshot_path)
+{
+    DIR *dir = opendir(snapshot_path);
+    if (dir == NULL)
+        return 0;
+
+    int count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        char fullpath[1024];
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", snapshot_path, entry->d_name);
+
+        struct stat st;
+        if (stat(fullpath, &st) == 0) {
+            if (S_ISDIR(st.st_mode))
+                count += count_snapshot_files(fullpath);
+            else if (S_ISREG(st.st_mode))
+                count++;
+        }
+    }
+    closedir(dir);
+    return count;
+}
 
 static void print_commit(Commit *node)
 {
@@ -18,6 +47,8 @@ static void print_commit(Commit *node)
     printf("parent branch: %s\n", node->parent_branch);
     printf("time: %s\n", timebuf);
     printf("snapshot: %s\n", node->snapshot_path);
+    int file_count = count_snapshot_files(node->snapshot_path);
+    printf("files: %d\n", file_count);
     printf("%s\n", SEPARATOR);
 }
 

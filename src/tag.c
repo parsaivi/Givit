@@ -63,6 +63,32 @@ static bool tag_exists(const char *tag_name)
     return false;
 }
 
+static void remove_tag(const char *tag_name)
+{
+    FILE *tags = fopen(".givit/tags", "r");
+    if (tags == NULL) return;
+
+    FILE *tmp = fopen(".givit/tags_tmp", "w");
+    if (tmp == NULL) {
+        fclose(tags);
+        return;
+    }
+
+    char temp[MAX_LINE_LEN];
+    while (fgets(temp, MAX_LINE_LEN, tags) != NULL) {
+        char name[MAX_NAME_LEN];
+        sscanf(temp, "\"%[^\"]\"", name);
+        if (strcmp(name, tag_name) != 0) {
+            fputs(temp, tmp);
+        }
+    }
+
+    fclose(tags);
+    fclose(tmp);
+    remove(".givit/tags");
+    rename(".givit/tags_tmp", ".givit/tags");
+}
+
 static void create_tag(const char *tag_name, int commit_id, const char *message)
 {
     char username[MAX_NAME_LEN] = "", email[MAX_NAME_LEN] = "";
@@ -170,10 +196,13 @@ int run_tag(int argc, char *argv[])
             }
         }
 
-        if (!force && tag_exists(tag_name)) {
-            perror("tag already exists");
-            commit_free_list(head);
-            return 1;
+        if (tag_exists(tag_name)) {
+            if (!force) {
+                perror("tag already exists");
+                commit_free_list(head);
+                return 1;
+            }
+            remove_tag(tag_name);
         }
 
         create_tag(tag_name, commit_id, message);

@@ -4,5 +4,6 @@
 #include "givit.h"
 
 int run_precommit(int argc, char *argv[]);
+int precommit_check_staged(void);
 
 #endif
